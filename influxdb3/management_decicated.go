@@ -7,12 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 type (
 	// Dedicatedclient represents a client for InfluxDB Cloud Dedicated administration operations.
 	DedicatedClient struct {
 		client *Client
+	}
+
+	DedicatedClientConfig struct {
+		AccountID        string
+		ClusterID        string
+		ManagementToken  string
+		ManagementAPIURL url.URL
 	}
 
 	Database struct {
@@ -51,7 +59,7 @@ func NewCloudDedicatedClient(client *Client) *DedicatedClient {
 	return &DedicatedClient{client: client}
 }
 
-func (d *DedicatedClient) CreateDatabase(ctx context.Context, db *Database, accountID, clusterID string) error {
+func (d *DedicatedClient) CreateDatabase(ctx context.Context, config *DedicatedClientConfig, db *Database) error {
 	if db == nil {
 		return errors.New("database must not nil")
 	}
@@ -73,13 +81,13 @@ func (d *DedicatedClient) CreateDatabase(ctx context.Context, db *Database, acco
 		db.MaxColumnsPerTable = uint64(250)
 	}
 
-	path := fmt.Sprintf("/api/v0/accounts/%s/clusters/%s/databases", accountID, clusterID)
+	path := fmt.Sprintf("/api/v0/accounts/%s/clusters/%s/databases", config.AccountID, config.ClusterID)
 
-	return d.createDatabase(ctx, path, db)
+	return d.createDatabase(ctx, path, db, config)
 }
 
-func (d *DedicatedClient) createDatabase(ctx context.Context, path string, db any) error {
-	u, err := d.client.apiURL.Parse(path)
+func (d *DedicatedClient) createDatabase(ctx context.Context, path string, db any, config *DedicatedClientConfig) error {
+	u, err := config.ManagementAPIURL.Parse(path)
 	if err != nil {
 		return fmt.Errorf("failed to parse database creation path: %w", err)
 	}
@@ -92,7 +100,7 @@ func (d *DedicatedClient) createDatabase(ctx context.Context, path string, db an
 	headers := http.Header{}
 	headers.Set("Content-Type", "application/json")
 	headers.Set("Accept", "application/json")
-	// TODO confirm if need to add the Bearer token here or not
+	headers.Set("Authorization", "Bearer "+config.ManagementToken)
 
 	param := httpParams{
 		endpointURL: u,

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,16 +18,23 @@ func TestDedicatedClientCreateDatabase(t *testing.T) {
 	correctPath := fmt.Sprintf("/api/v0/accounts/%s/clusters/%s/databases", "test-account", "test-cluster")
 
 	tests := []struct {
-		name     string
-		db       *Database
-		wantBody map[string]any
-		wantErr  bool
+		name         string
+		db           *Database
+		clientConfig *ClientConfig
+		wantBody     map[string]any
+		wantErr      bool
 	}{
 		{
 			name: "create database with name and defaults",
 			db: &Database{
 				Name:              "test-database",
 				PartitionTemplate: []PartitionTemplate{},
+			},
+			clientConfig: &ClientConfig{
+				Host:         "",
+				Token:        "my-token",
+				Organization: "default-organization",
+				Database:     "default-database",
 			},
 			wantBody: map[string]any{
 				"name":               "default-database",
@@ -58,6 +66,12 @@ func TestDedicatedClientCreateDatabase(t *testing.T) {
 					},
 				},
 			},
+			clientConfig: &ClientConfig{
+				Host:         "",
+				Token:        "my-token",
+				Organization: "default-organization",
+				Database:     "default-database",
+			},
 			wantBody: map[string]any{
 				"name":               "default-database",
 				"maxTables":          float64(1000),
@@ -80,8 +94,14 @@ func TestDedicatedClientCreateDatabase(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:     "nil database",
-			db:       nil,
+			name: "nil database",
+			db:   nil,
+			clientConfig: &ClientConfig{
+				Host:         "",
+				Token:        "my-token",
+				Organization: "default-organization",
+				Database:     "default-database",
+			},
 			wantBody: map[string]any{},
 			wantErr:  true,
 		},
@@ -100,6 +120,26 @@ func TestDedicatedClientCreateDatabase(t *testing.T) {
 					Tag{},
 				},
 			},
+			clientConfig: &ClientConfig{
+				Host:         "",
+				Token:        "my-token",
+				Organization: "default-organization",
+				Database:     "default-database",
+			},
+			wantBody: map[string]any{},
+			wantErr:  true,
+		},
+		{
+			name: "empty database name",
+			db: &Database{
+				Name: "",
+			},
+			clientConfig: &ClientConfig{
+				Host:         "",
+				Token:        "my-token",
+				Organization: "default-organization",
+				Database:     "",
+			},
 			wantBody: map[string]any{},
 			wantErr:  true,
 		},
@@ -107,6 +147,9 @@ func TestDedicatedClientCreateDatabase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "empty database name" {
+				fmt.Println("empty database name")
+			}
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// initialization of query client
 				if r.Method == "PRI" {
@@ -123,16 +166,20 @@ func TestDedicatedClientCreateDatabase(t *testing.T) {
 				w.WriteHeader(201)
 			}))
 
-			c, err := New(ClientConfig{
-				Host:         ts.URL,
-				Token:        "my-token",
-				Organization: "default-organization",
-				Database:     "default-database",
-			})
+			tt.clientConfig.Host = ts.URL
+			c, err := New(*tt.clientConfig)
 			require.NoError(t, err)
 
+			managementAPIURL, _ := url.Parse(ts.URL)
+			config := DedicatedClientConfig{
+				AccountID:        "test-account",
+				ClusterID:        "test-cluster",
+				ManagementToken:  "dummy",
+				ManagementAPIURL: *managementAPIURL,
+			}
+
 			dc := NewCloudDedicatedClient(c)
-			err = dc.CreateDatabase(context.Background(), tt.db, "test-account", "test-cluster")
+			err = dc.CreateDatabase(context.Background(), &config, tt.db)
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
@@ -148,14 +195,23 @@ func TestDedicatedClientCreateDatabase(t *testing.T) {
 		})
 		require.NoError(t, err)
 
+		managementAPIURL, _ := url.Parse(c.config.Host)
+
+		config := DedicatedClientConfig{
+			AccountID:        "test-account",
+			ClusterID:        "test-cluster",
+			ManagementToken:  "dummy",
+			ManagementAPIURL: *managementAPIURL,
+		}
+
 		dc := NewCloudDedicatedClient(c)
-		err = dc.createDatabase(context.Background(), "wrong path:", nil)
+		err = dc.createDatabase(context.Background(), "wrong path:", nil, &config)
 		assert.Error(t, err)
 
 		wrongBody := map[string]any{
 			"funcField": func() {},
 		}
-		err = dc.createDatabase(context.Background(), correctPath, wrongBody)
+		err = dc.createDatabase(context.Background(), correctPath, wrongBody, &config)
 		assert.Error(t, err)
 	})
 
